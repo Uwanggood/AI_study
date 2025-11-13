@@ -4,6 +4,9 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import os
+import csv
+import json
+from datetime import datetime
 from tqdm import tqdm
 
 class AlexNet(nn.Module):
@@ -134,7 +137,19 @@ def load_checkpoint(model, optimizer, checkpoint_path):
 def train_model(model, train_loader, val_loader, num_epochs, lr, device,
                 save_dir='checkpoints', model_name='alexnet'):
     """전체 학습 루프"""
-    os.makedirs(save_dir, exist_ok=True)
+    # 러닝 세션 디렉토리: save_dir/model_name/YYYYMMDD_HHMMSS
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    base_dir = os.path.join(save_dir, model_name, timestamp)
+    os.makedirs(base_dir, exist_ok=True)
+    print(f"Run directory: {base_dir}")
+
+    # 에폭별 서브디렉토리 및 CSV 요약 파일 준비
+    metrics_csv_path = os.path.join(base_dir, 'metrics.csv')
+    with open(metrics_csv_path, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            'epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc', 'lr'
+        ])
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
@@ -162,22 +177,53 @@ def train_model(model, train_loader, val_loader, num_epochs, lr, device,
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Learning Rate: {current_lr}")
 
+        # 에폭 디렉토리 생성 및 메트릭 저장
+        epoch_dir = os.path.join(base_dir, f'epoch_{epoch+1:03d}')
+        os.makedirs(epoch_dir, exist_ok=True)
+        # JSON로 에폭 메트릭 저장
+        epoch_metrics = {
+            'epoch': epoch + 1,
+            'train_loss': float(f"{train_loss:.6f}"),
+            'train_acc': float(f"{train_acc:.6f}"),
+            'val_loss': float(f"{val_loss:.6f}"),
+            'val_acc': float(f"{val_acc:.6f}"),
+            'lr': current_lr,
+        }
+        with open(os.path.join(epoch_dir, 'metrics.json'), 'w') as jf:
+            json.dump(epoch_metrics, jf, indent=2)
+        # 텍스트 요약도 저장
+        with open(os.path.join(epoch_dir, 'metrics.txt'), 'w') as tf:
+            tf.write(
+                f"Epoch: {epoch+1}\n"
+                f"Train Loss: {train_loss:.6f}, Train Acc: {train_acc:.2f}%\n"
+                f"Val   Loss: {val_loss:.6f}, Val   Acc: {val_acc:.2f}%\n"
+                f"LR: {current_lr}\n"
+            )
+        # CSV에 한 줄 추가
+        with open(metrics_csv_path, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                epoch + 1, f"{train_loss:.6f}", f"{train_acc:.4f}",
+                f"{val_loss:.6f}", f"{val_acc:.4f}", current_lr
+            ])
+
         # 최고 성능 모델 저장
         if val_acc > best_acc:
             best_acc = val_acc
             save_checkpoint(
                 model, optimizer, epoch, val_acc,
-                os.path.join(save_dir, f'{model_name}_best.pth')
+                os.path.join(base_dir, f'{model_name}_best.pth')
             )
 
         # 매 10 epoch마다 저장
         if (epoch + 1) % 10 == 0:
             save_checkpoint(
                 model, optimizer, epoch, val_acc,
-                os.path.join(save_dir, f'{model_name}_epoch_{epoch+1}.pth')
+                os.path.join(base_dir, f'{model_name}_epoch_{epoch+1}.pth')
             )
 
     print(f"\nTraining completed! Best Val Acc: {best_acc:.2f}%")
+    print(f"All logs and checkpoints are saved under: {base_dir}")
     return best_acc
 
 
