@@ -1,14 +1,13 @@
-import tensorflow as tf
-from skimage.color import gray2rgb
+import torchvision.transforms.functional as F
 import numpy as np
 
 
 def preprocess_image_with_rgb(datas):
     x_train = []
     for i in range(len(datas)):
-        image = tf.constant(datas[i])
-        image = image[tf.newaxis, ..., tf.newaxis]
-        image = tf.image.resize_with_pad(image, target_width=224, target_height=224)[0, ..., 0].numpy()
-        grey_image = gray2rgb(image)
-        x_train.append(grey_image)
+        image = datas[i].unsqueeze(0).unsqueeze(0).float()
+        image = F.resize(image, [224, 224], antialias=True)
+        image = image.squeeze(0).repeat(3, 1, 1)
+        image = image.permute(1, 2, 0).numpy()
+        x_train.append(image)
     return np.array(x_train)

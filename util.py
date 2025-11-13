@@ -1,16 +1,19 @@
-import tensorflow as tf
-import cv2
-from opt_einsum.backends import torch
+import torch
+import torchvision.transforms.functional as F
+from PIL import Image
 
 
 def resize_with_pad(image, target_height, target_width):
-    image = tf.constant(image)
-    image = image[tf.newaxis, ..., tf.newaxis]
-    return tf.image.resize_with_pad(image, target_width=target_width, target_height=target_height)[0, ..., 0].numpy()
+    if not isinstance(image, torch.Tensor):
+        image = torch.from_numpy(image).float()
+    if image.dim() == 2:
+        image = image.unsqueeze(0)
+    image = F.resize(image, [target_height, target_width], antialias=True)
+    return image.squeeze(0).numpy()
 
 
 def get_image_file(path):
-    return cv2.imread(path)
+    return Image.open(path)
 
 
 def train(dataloader, model, loss_fn, optimizer, device):
@@ -18,8 +21,8 @@ def train(dataloader, model, loss_fn, optimizer, device):
     for batch, (X, y) in enumerate(dataloader):
         X, y = X.to(device), y.to(device)
         # 예측 오류 계산
-        if(X.shape[1] != 3):
-            X = X.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
+        if X.shape[1] != 3:
+            X = X.permute(0, 3, 1, 2)  # (N, H, W, C) -> (N, C, H, W)
 
         pred = model(X)
         loss = loss_fn(pred, y)
@@ -47,7 +50,9 @@ def test(dataloader, model, loss_fn, device):
             correct += (pred.argmax(1) == y).type(torch.float).sum().item()
     test_loss /= num_batches
     correct /= size
-    print(f"Test Error: \n Accuracy: {(100 * correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+    print(
+        f"Test Error: \n Accuracy: {(100 * correct):>0.1f}%, Avg loss: {test_loss:>8f} \n"
+    )
 
 
 def train_loop(dataloader, model, loss_fn, optimizer):
@@ -80,4 +85,6 @@ def test_loop(dataloader, model, loss_fn):
 
     test_loss /= num_batches
     correct /= size
-    print(f"Test Error: \n Accuracy: {(100 * correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+    print(
+        f"Test Error: \n Accuracy: {(100 * correct):>0.1f}%, Avg loss: {test_loss:>8f} \n"
+    )
