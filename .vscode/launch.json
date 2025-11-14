@@ -4,7 +4,7 @@
             "name": "Python Debugger: main.py",
             "type": "debugpy",
             "request": "launch",
-            "program": "main.py",
+            "program": "imagenet.py",
             "console": "integratedTerminal"
         }
     ]
