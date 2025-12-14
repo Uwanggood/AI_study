@@ -5,7 +5,7 @@ import torch.nn as nn
 
 
 class TransformerEncoderLayer(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
+    def __init__(self, d_model=64, num_heads=8, d_ff=256, dropout=0.1):
         super().__init__()
 
         # 1. Self-Attention 서브 레이어
@@ -127,24 +127,80 @@ class PatchEmbedding(nn.Module):
         return x
 
 
-# 1. 가상의 이미지 생성 (배치 1개, RGB, 224x224)
-raw_image = torch.randn(1, 3, 224, 224)
-print(f"1. 원본 이미지: {raw_image.shape}")
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super().__init__()
 
-# 2. 패치 임베딩 (이미지를 벡터 시퀀스로 변환)
-# d_model = 64로 설정
-embedder = PatchEmbedding(img_size=224, patch_size=16, d_model=64)
-input_vector = embedder(raw_image)
+        # 1. (Seq_Len, d_model) 크기의 0 행렬 생성
+        pe = torch.zeros(max_len, d_model)
 
-print(f"2. 패치 임베딩 후 (Input 'x'): {input_vector.shape}")
-print("   -> 해석: [배치1, 패치196개, 특징64개]")
-print("   -> 이제 이 196개의 패치가 마치 '196개의 단어'처럼 취급됩니다.")
+        # 2. 위치 인덱스 (0, 1, 2, ... 195)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
 
-# 3. 트랜스포머 인코더 통과
-# 님이 작성한 Encoder Layer 생성-
-encoder_layer = TransformerEncoderLayer(d_model=64, num_heads=8, d_ff=256)
+        # 3. 주파수 계산 (10000^(2i/d_model))
+        # 복잡해 보이지만, 그냥 "서로 다른 주기의 파동을 만든다"는 수식입니다.
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
 
-# Forward! (여기서 내부적으로 Q, K, V가 만들어집니다)
-output = encoder_layer(input_vector)
+        # 4. 짝수 인덱스엔 Sin, 홀수 인덱스엔 Cos 적용
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
 
-print(f"3. 인코더 출력: {output.shape}")
+        # 5. 배치 차원 추가 (1, Seq, Dim) -> 브로드캐스팅용
+        pe = pe.unsqueeze(0)
+
+        # 중요: 학습되는 파라미터가 아니므로 buffer로 등록 (저장은 하되 업데이트 X)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        # 입력 x에 위치 정보를 더해줌 (x + PE)
+        # x.size(1)은 시퀀스 길이 (예: 196)
+        return x + self.pe[:, :x.size(1)]
+
+
+class SimpleViT(nn.Module):
+    def __init__(self, img_size=224, patch_size=16, d_model=64, num_heads=8, num_layers=6):
+        super().__init__()
+
+        # [1] 전처리: 이미지 -> 패치 벡터 (Batch, 196, 64)
+        self.patch_embed = PatchEmbedding(img_size, patch_size, 3, d_model)
+
+        # [2] 위치 정보: 벡터에 주소 더하기
+        self.pos_encoder = PositionalEncoding(d_model)
+
+        # [3] 인코더 쌓기 (6층 석탑)
+        # 님께서 만든 TransformerEncoderLayer를 6번 쌓음
+        self.layers = nn.ModuleList([
+            TransformerEncoderLayer(d_model, num_heads, d_ff=d_model * 4)
+            for _ in range(num_layers)
+        ])
+
+        # [4] 분류기 (마지막에 개인지 고양이인지 맞추는 놈)
+        self.norm = nn.LayerNorm(d_model)
+        self.head = nn.Linear(d_model, 10)  # 예: 10개 클래스 분류
+
+    def forward(self, x):
+        # 1. Embedding (이미지 -> 벡터)
+        x = self.patch_embed(x)  # [B, 196, 64]
+
+        # 2. Add Position (위치 정보 추가)
+        x = self.pos_encoder(x)  # [B, 196, 64] -> 값이 살짝 변함
+
+        # 3. Transformer Encoder Layers (반복)
+        for layer in self.layers:
+            x = layer(x)
+
+        # 4. Classification
+        # 보통 전체 패치의 평균(Global Average Pooling)을 쓰거나
+        # 맨 첫 번째 패치(CLS 토큰)만 사용함. 여기선 평균 사용.
+        x = self.norm(x)
+        x = x.mean(dim=1)  # [B, 196, 64] -> [B, 64] (패치들을 하나로 압축)
+
+        # 5. 최종 예측
+        return self.head(x)  # [B, 10]
+
+
+# --- 실행 ---
+model = SimpleViT()
+img = torch.randn(1, 3, 224, 224)
+pred = model(img)
+print(f"최종 출력 Shape: {pred.shape}")  # [1, 10] -> 클래스 확률값
