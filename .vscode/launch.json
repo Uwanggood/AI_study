@@ -1,6 +1,13 @@
 {
     "configurations": [
         {
+            "name": "Python Debugger: attention/my_self_attention2.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "attention/my_self_attention2.py",
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Python Debugger: main.py",
             "type": "debugpy",
             "request": "launch",
